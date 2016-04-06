@@ -29,9 +29,18 @@ if(LIBSWSCALE_FOUND)
 endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -D__STDC_CONSTANT_MACROS")
-set(SOURCE_FILES main.cpp)
-add_executable(fMP4 ${SOURCE_FILES})
-target_link_libraries(fMP4
+
+add_executable(fMP4-sample1 sample1.cpp)
+target_link_libraries(fMP4-sample1
+        ${LIBAVCODEC_LIBRARIES}
+        ${LIBAVUTIL_LIBRARIES}
+        ${LIBAVFORMAT_LIBRARIES}
+        ${LIBSWSCALE_LIBRARIES}
+        ${CMAKE_THREAD_LIBS_INIT}
+)
+
+add_executable(fMP4-sample2 sample2.cpp)
+target_link_libraries(fMP4-sample2
         ${LIBAVCODEC_LIBRARIES}
         ${LIBAVUTIL_LIBRARIES}
         ${LIBAVFORMAT_LIBRARIES}
