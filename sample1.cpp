@@ -84,14 +84,12 @@ typedef struct OutputStream {
 
     /* pts of the next frame that will be generated */
     int64_t next_pts;
-    int samples_count;
 
     AVFrame *frame;
 
-    float t, tincr, tincr2;
-
     struct SwsContext *sws_ctx;
     struct SwrContext *swr_ctx;
+
 } OutputStream;
 
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt)

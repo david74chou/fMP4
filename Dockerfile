@@ -55,4 +55,13 @@ RUN cd /tmp; \
     make -j4; \
     make install
 
-RUN rm -rf ffmpeg-*
+RUN cd /tmp; \
+    git clone https://github.com/david7482/mp4v2.git; \
+    cd mp4v2; \
+    git checkout cc17ffe84c08f26011e4a2867f6196e62c4258ee -b build; \
+    autoreconf --install; \
+    ./configure --prefix=/usr/local --disable-static --disable-debug; \
+    make -j4; \
+    make install
+
+RUN rm -rf /tmp/*

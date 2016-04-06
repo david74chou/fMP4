@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 2.6)
 project(fMP4)
 
+set( CMAKE_BUILD_TYPE Debug )
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -28,6 +32,11 @@ if(LIBSWSCALE_FOUND)
     link_directories(${LIBSWSCALE_LIBRARY_DIRS})
 endif()
 
+find_package(MP4V2 REQUIRED)
+if(MP4V2_FOUND)
+    include_directories(${MP4V2_INCLUDE_DIRS})
+endif()
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -D__STDC_CONSTANT_MACROS")
 
 add_executable(fMP4-sample1 sample1.cpp)
@@ -46,4 +55,5 @@ target_link_libraries(fMP4-sample2
         ${LIBAVFORMAT_LIBRARIES}
         ${LIBSWSCALE_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
+        ${MP4V2_LIBRARY}
 )

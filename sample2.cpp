@@ -29,6 +29,8 @@
  */
 
 #include <string>
+#include <memory>
+#include <functional>
 
 extern "C" {
 #include <libavutil/timestamp.h>
@@ -59,6 +61,8 @@ static const std::string av_ts_make_time_string(int64_t ts, AVRational *tb)
 #undef av_ts2timestr
 #define av_ts2timestr(ts, tb) av_ts_make_time_string(ts, tb).c_str()
 
+typedef std::unique_ptr<AVFormatContext, std::function<void (AVFormatContext *)>> AVFmtCtx;
+
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, const char *tag)
 {
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
@@ -73,13 +77,6 @@ static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, cons
 
 int main(int argc, char **argv)
 {
-    AVOutputFormat *ofmt = NULL;
-    AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
-    AVPacket pkt;
-    const char *in_filename, *out_filename;
-    int ret, i;
-    AVDictionary *movflags = NULL;
-
     if (argc < 3) {
         printf("usage: %s input output\n"
                        "API example program to remux a media file with libavformat and libavcodec.\n"
@@ -88,105 +85,118 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    in_filename  = argv[1];
-    out_filename = argv[2];
+    std::string in_filename  = argv[1];
+    std::string out_filename = argv[2];
 
     av_register_all();
 
-    if ((ret = avformat_open_input(&ifmt_ctx, in_filename, 0, 0)) < 0) {
-        fprintf(stderr, "Could not open input file '%s'", in_filename);
-        goto end;
-    }
+    AVFmtCtx input_fmt_ctx  = AVFmtCtx(nullptr, [](AVFormatContext *context) { avformat_close_input(&context); });
+    AVFmtCtx output_fmt_ctx = AVFmtCtx(nullptr, [](AVFormatContext *context) { avformat_free_context(context); });
 
-    if ((ret = avformat_find_stream_info(ifmt_ctx, 0)) < 0) {
-        fprintf(stderr, "Failed to retrieve input stream information");
-        goto end;
-    }
+    int ret = 0;
+    do {
 
-    av_dump_format(ifmt_ctx, 0, in_filename, 0);
+        /*
+         * Input format context
+         */
+        input_fmt_ctx.reset(avformat_alloc_context());
+        auto ifmt_ctx = input_fmt_ctx.get();
+        if ((ret = avformat_open_input(&ifmt_ctx, in_filename.c_str(), 0, 0)) < 0) {
+            fprintf(stderr, "Could not open input file '%s'", in_filename.c_str());
+            break;
+        }
+        if ((ret = avformat_find_stream_info(input_fmt_ctx.get(), 0)) < 0) {
+            fprintf(stderr, "Failed to retrieve input stream information");
+            break;
+        }
+        av_dump_format(input_fmt_ctx.get(), 0, in_filename.c_str(), 0);
 
-    avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename);
-    if (!ofmt_ctx) {
-        fprintf(stderr, "Could not create output context\n");
-        ret = AVERROR_UNKNOWN;
-        goto end;
-    }
-
-    ofmt = ofmt_ctx->oformat;
-
-    for (i = 0; i < ifmt_ctx->nb_streams; i++) {
-        AVStream *in_stream = ifmt_ctx->streams[i];
-        AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
-        if (!out_stream) {
-            fprintf(stderr, "Failed allocating output stream\n");
+        /*
+         * Output format context
+         */
+        AVFormatContext *ctx = NULL;
+        avformat_alloc_output_context2(&ctx, NULL, NULL, out_filename.c_str());
+        if (!ctx) {
+            fprintf(stderr, "Could not create output context\n");
             ret = AVERROR_UNKNOWN;
-            goto end;
-        }
-
-        ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
-        if (ret < 0) {
-            fprintf(stderr, "Failed to copy context from input to output stream codec context\n");
-            goto end;
-        }
-        out_stream->codec->codec_tag = 0;
-        if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-            out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-    }
-    av_dump_format(ofmt_ctx, 0, out_filename, 1);
-
-    if (!(ofmt->flags & AVFMT_NOFILE)) {
-        ret = avio_open(&ofmt_ctx->pb, out_filename, AVIO_FLAG_WRITE);
-        if (ret < 0) {
-            fprintf(stderr, "Could not open output file '%s'", out_filename);
-            goto end;
-        }
-    }
-
-    /* Write the stream header, if any. */
-    av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof+frag_keyframe", 0);
-    if ((ret = avformat_write_header(ofmt_ctx, &movflags)) < 0) {
-        fprintf(stderr, "Error occurred when opening output file: %s\n", av_err2str(ret));
-        goto end;
-    }
-    av_dict_free(&movflags);
-
-    while (1) {
-        AVStream *in_stream, *out_stream;
-
-        ret = av_read_frame(ifmt_ctx, &pkt);
-        if (ret < 0)
-            break;
-
-        in_stream  = ifmt_ctx->streams[pkt.stream_index];
-        out_stream = ofmt_ctx->streams[pkt.stream_index];
-
-        log_packet(ifmt_ctx, &pkt, "in");
-
-        /* copy packet */
-        AVRounding rounding = static_cast<AVRounding>(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
-        pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, rounding);
-        pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, rounding);
-        pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
-        pkt.pos = -1;
-        log_packet(ofmt_ctx, &pkt, "out");
-
-        ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
-        if (ret < 0) {
-            fprintf(stderr, "Error muxing packet\n");
             break;
         }
-        av_packet_unref(&pkt);
-    }
+        output_fmt_ctx.reset(ctx);
 
-    av_write_trailer(ofmt_ctx);
-    end:
+        for (int i = 0; i < input_fmt_ctx->nb_streams; i++) {
+            AVStream *in_stream = input_fmt_ctx->streams[i];
+            AVStream *out_stream = avformat_new_stream(output_fmt_ctx.get(), in_stream->codec->codec);
+            if (!out_stream) {
+                fprintf(stderr, "Failed allocating output stream\n");
+                ret = AVERROR_UNKNOWN;
+                break;
+            }
 
-    avformat_close_input(&ifmt_ctx);
+            ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+            if (ret < 0) {
+                fprintf(stderr, "Failed to copy context from input to output stream codec context\n");
+                break;
+            }
+            out_stream->codec->codec_tag = 0;
+            if (output_fmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
+                out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        }
+        av_dump_format(output_fmt_ctx.get(), 0, out_filename.c_str(), 1);
+
+        if (!(output_fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
+            ret = avio_open(&output_fmt_ctx->pb, out_filename.c_str(), AVIO_FLAG_WRITE);
+            if (ret < 0) {
+                fprintf(stderr, "Could not open output file '%s'", out_filename.c_str());
+                break;
+            }
+        }
+
+        /* Write the stream header, if any. */
+        AVDictionary *movflags = nullptr;
+        av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof+frag_keyframe", 0);
+        if ((ret = avformat_write_header(output_fmt_ctx.get(), &movflags)) < 0) {
+            fprintf(stderr, "Error occurred when opening output file: %s\n", av_err2str(ret));
+            break;
+        }
+        av_dict_free(&movflags);
+
+        AVPacket pkt;
+        while (1) {
+
+            AVStream *in_stream = NULL, *out_stream = NULL;
+
+            if ((ret = av_read_frame(input_fmt_ctx.get(), &pkt)) < 0) break;
+            {
+                in_stream  = input_fmt_ctx->streams[pkt.stream_index];
+                out_stream = output_fmt_ctx->streams[pkt.stream_index];
+
+                log_packet(input_fmt_ctx.get(), &pkt, "in");
+                {
+                    /* copy packet */
+                    AVRounding rounding = static_cast<AVRounding>(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+                    pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, rounding);
+                    pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, rounding);
+                    pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
+                    pkt.pos = -1;
+                }
+                log_packet(output_fmt_ctx.get(), &pkt, "out");
+
+                if ((ret = av_interleaved_write_frame(output_fmt_ctx.get(), &pkt)) < 0) {
+                    fprintf(stderr, "Error muxing packet\n");
+                    break;
+                }
+            }
+
+            av_packet_unref(&pkt);
+        }
+
+        av_write_trailer(output_fmt_ctx.get());
+
+    } while(false);
 
     /* close output */
-    if (ofmt_ctx && !(ofmt->flags & AVFMT_NOFILE))
-        avio_closep(&ofmt_ctx->pb);
-    avformat_free_context(ofmt_ctx);
+    if (output_fmt_ctx && !(output_fmt_ctx->oformat->flags & AVFMT_NOFILE))
+        avio_closep(&output_fmt_ctx->pb);
 
     if (ret < 0 && ret != AVERROR_EOF) {
         fprintf(stderr, "Error occurred: %s\n", av_err2str(ret));
