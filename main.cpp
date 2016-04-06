@@ -48,7 +48,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 
-#define STREAM_DURATION   10.0
+#define STREAM_DURATION   100.0
 #define STREAM_FRAME_RATE 25 /* 25 images/s */
 #define STREAM_PIX_FMT    AV_PIX_FMT_YUV420P /* default pix_fmt */
 
@@ -609,18 +609,13 @@ int main(int argc, char **argv)
     }
 
     filename = argv[1];
-    if (argc > 3 && !strcmp(argv[2], "-flags")) {
-        av_dict_set(&opt, argv[2]+1, argv[3], 0);
-    }
 
     /* allocate the output media context */
-    avformat_alloc_output_context2(&oc, NULL, NULL, filename);
+    avformat_alloc_output_context2(&oc, NULL, "mp4", NULL);
     if (!oc) {
-        printf("Could not deduce output format from file extension: using MPEG.\n");
-        avformat_alloc_output_context2(&oc, NULL, "mpeg", filename);
-    }
-    if (!oc)
+        printf("fail to generate mp4 format context");
         return 1;
+    }
 
     fmt = oc->oformat;
 
@@ -658,12 +653,14 @@ int main(int argc, char **argv)
     }
 
     /* Write the stream header, if any. */
-    ret = avformat_write_header(oc, &opt);
+    AVDictionary *movflags = NULL;
+    av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof+frag_keyframe", 0);
+    ret = avformat_write_header(oc, &movflags);
     if (ret < 0) {
-        fprintf(stderr, "Error occurred when opening output file: %s\n",
-                av_err2str(ret));
+        fprintf(stderr, "Error occurred when opening output file: %s\n", av_err2str(ret));
         return 1;
     }
+    av_dict_free(&movflags);
 
     while (encode_video || encode_audio) {
         /* select the stream to encode */
