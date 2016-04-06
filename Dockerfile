@@ -41,6 +41,7 @@ RUN apt-get -y install \
             libxcb1-dev \
             libxcb-shm0-dev \
             libxcb-xfixes0-dev \
+            libx264-dev \
             texinfo \
             zlib1g-dev \
             yasm \
@@ -50,7 +51,7 @@ RUN cd /tmp; \
     wget https://github.com/FFmpeg/FFmpeg/releases/download/n3.0/ffmpeg-3.0.tar.bz2; \
     tar xjvf ffmpeg-3.0.tar.bz2; \
     cd ffmpeg-3.0; \
-    ./configure --prefix="/usr/local" --extra-cflags="-I/usr/local/include" --extra-ldflags="-L/usr/local/lib"; \
+    ./configure --prefix="/usr/local" --extra-cflags="-I/usr/local/include" --extra-ldflags="-L/usr/local/lib" --enable-gpl --enable-libx264; \
     make -j4; \
     make install
 
