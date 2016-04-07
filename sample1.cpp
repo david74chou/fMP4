@@ -371,9 +371,8 @@ int main(int argc, char **argv)
     /* Add the video streams using the default format codecs and initialize the codecs. */
     OutputStream video_st = {0};
     AVCodec *video_codec = NULL;
-    AVOutputFormat *fmt = oc->oformat;
-    if (fmt->video_codec != AV_CODEC_ID_NONE) {
-        add_stream(&video_st, oc, &video_codec, fmt->video_codec);
+    if (oc->oformat->video_codec != AV_CODEC_ID_NONE) {
+        add_stream(&video_st, oc, &video_codec, oc->oformat->video_codec);
     }
 
     /* Now that all the parameters are set, we can open the
@@ -386,7 +385,7 @@ int main(int argc, char **argv)
 
     /* open the output file, if needed */
     int ret = 0;
-    if (!(fmt->flags & AVFMT_NOFILE)) {
+    if (!(oc->oformat->flags & AVFMT_NOFILE)) {
         if ((ret = avio_open(&oc->pb, filename.c_str(), AVIO_FLAG_WRITE)) < 0) {
             fprintf(stderr, "Could not open '%s': %s\n", filename.c_str(), av_err2str(ret));
             return 1;
@@ -418,7 +417,7 @@ int main(int argc, char **argv)
     if (video_codec != NULL)
         close_stream(oc, &video_st);
 
-    if (!(fmt->flags & AVFMT_NOFILE))
+    if (!(oc->oformat->flags & AVFMT_NOFILE))
         /* Close the output file. */
         avio_closep(&oc->pb);
 
