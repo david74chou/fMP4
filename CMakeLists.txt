@@ -55,5 +55,14 @@ target_link_libraries(fMP4-sample2
         ${LIBAVFORMAT_LIBRARIES}
         ${LIBSWSCALE_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
+)
+
+add_executable(fMP4-sample3 sample3.cpp)
+target_link_libraries(fMP4-sample3
+        ${LIBAVCODEC_LIBRARIES}
+        ${LIBAVUTIL_LIBRARIES}
+        ${LIBAVFORMAT_LIBRARIES}
+        ${LIBSWSCALE_LIBRARIES}
+        ${CMAKE_THREAD_LIBS_INIT}
         ${MP4V2_LIBRARY}
 )
