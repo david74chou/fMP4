@@ -174,13 +174,6 @@ public:
             return false;
         }
 
-        /*AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_H264);
-        if (!codec) {
-            printf("Fail to find encoder: %s\n", avcodec_get_name(AV_CODEC_ID_H264));
-            return false;
-        }
-        AVStream *out_stream = avformat_new_stream(format_context, codec);*/
-
         AVStream *out_stream = avformat_new_stream(format_context, nullptr);
         if (!out_stream) {
             printf("Fail to allocate output stream\n");
@@ -199,6 +192,17 @@ public:
         out_stream->codec->bit_rate   = bit_rate;
         out_stream->codec->pix_fmt    = AV_PIX_FMT_YUV420P;
         out_stream->codec->codec_tag  = 0;
+
+        // Fill extra data for AVCC format
+        out_stream->codec->extradata_size = 7;
+        out_stream->codec->extradata = (uint8_t *)av_mallocz(out_stream->codec->extradata_size);
+        out_stream->codec->extradata[0] = 0x01;                        // configurationVersion
+        out_stream->codec->extradata[1] = FF_PROFILE_H264_BASELINE;    // AVCProfileIndication
+        out_stream->codec->extradata[2] = FF_PROFILE_H264_CONSTRAINED; // profile_compatibility
+        out_stream->codec->extradata[3] = 0x28;                        // AVCLevelIndication, level: 4.0
+        out_stream->codec->extradata[4] = 0xff;                        // 6 bits reserved (111111) + 2 bits nal size length - 1 (11)
+        out_stream->codec->extradata[5] = 0xe0;                        // 3 bits reserved (111) + 5 bits number of sps (00000)
+        out_stream->codec->extradata[6] = 0x00;                        // 8 bits number of pps (00000000)
 
         if (format_context->oformat->flags & AVFMT_GLOBALHEADER)
             out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
@@ -238,6 +242,12 @@ public:
                               bool is_key_frame,
                               unsigned long long int duration)
     {
+        // Convert AnnexB format to AVCC
+        if (sample_size >= 4) {
+            unsigned int *p = (unsigned int *) sample;
+            *p = htonl(sample_size - 4);
+        }
+
         AVPacket packet = { 0 };
         av_init_packet(&packet);
 
