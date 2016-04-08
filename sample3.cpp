@@ -7,17 +7,6 @@ extern "C" {
     #include <libavformat/avformat.h>
 };
 
-/*
-    FIX: H.264 in some container format (FLV, MP4, MKV etc.) need
-    "h264_mp4toannexb" bitstream filter (BSF)
-      *Add SPS,PPS in front of IDR frame
-      *Add start code ("0,0,0,1") in front of NALU
-    H.264 in some container (MPEG2TS) don't need this BSF.
-*/
-//'1': Use H.264 Bitstream Filter
-#define USE_H264BSF 0
-
-
 class MP4Reader
 {
 public:
