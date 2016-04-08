@@ -1,4 +1,5 @@
 #include <string>
+#include <thread>
 
 #include <mp4v2/mp4v2.h>
 #include <netinet/in.h>
@@ -289,6 +290,9 @@ int main(int argc, char **argv)
     bool is_key_frame = false;
     while (input.GetNextH264VideoSample(&sample, sample_size, duration, is_key_frame) == MP4Reader::MP4_READ_OK) {
         output.WriteH264VideoSample(sample, sample_size, is_key_frame, duration);
+
+        // Sleep to simulate processing time
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     return 0;
