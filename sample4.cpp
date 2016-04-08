@@ -123,10 +123,12 @@ class MP4Writer
 public:
 
     MP4Writer(const std::string &file_path)
-        : file_path(file_path)
-        , file_duration(0)
-        , format_context(nullptr)
-        , video_stream_id(0)
+            : file_path(file_path)
+            , file_duration(0)
+            , format_context(nullptr)
+            , video_stream_id(0)
+            , avio_buffer_size(1024 * 1024)
+            , fptr(nullptr)
     {
         av_register_all();
     }
@@ -144,13 +146,34 @@ public:
         }
 
         if (format_context && !(format_context->oformat->flags & AVFMT_NOFILE)) {
-            if (avio_closep(&format_context->pb) < 0) {
-                printf("Fail to close AVIO context\n");
-            }
+            // Need to free the buffer that we allocate to our custom AVIOContext.
+            av_free(format_context->pb->buffer);
+
+            // Free custom AVIOContext.
+            av_free(format_context->pb);
+
+            // Close the file pointer
+            fclose(fptr);
         }
 
         if (format_context)
             avformat_free_context(format_context);
+    }
+
+    // Performs a write operation using the signature required for avio.
+    static int Write(void* opaque, uint8_t* buf, int buf_size)
+    {
+        static int i = 0;
+        printf("#%d Write: buf: %p(%02x%02x%02x%02x %c%c%c%c), size: %d\n", i++, buf, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf_size);
+        return fwrite(buf, 1, buf_size, reinterpret_cast<MP4Writer*>(opaque)->fptr);
+    }
+
+    // Performs a seek operation using the signature required for avio.
+    static int64_t Seek(void* opaque, int64_t offset, int whence)
+    {
+        static int i = 0;
+        printf("#%d Seek: offset: %ld, whence: %d\n", i++, offset, whence);
+        return 0;
     }
 
     bool AddH264VideoTrack(const unsigned int width,
@@ -197,17 +220,32 @@ public:
         if (format_context->oformat->flags & AVFMT_GLOBALHEADER)
             out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
-        av_dump_format(format_context, 0, file_path.c_str(), 1);
+        av_dump_format(format_context, 0, "CustomAVIO", 1);
 
         /*
          * Open output file
          */
         {
             if (!(format_context->oformat->flags & AVFMT_NOFILE)) {
-                if (avio_open(&format_context->pb, file_path.c_str(), AVIO_FLAG_WRITE) < 0) {
-                    printf("Could not open output file '%s'", file_path.c_str());
+
+                // Allocate our custom AVIO context
+                AVIOContext *avio_out = avio_alloc_context(static_cast<unsigned char *>(av_malloc(avio_buffer_size)),
+                                                           avio_buffer_size,
+                                                           1,
+                                                           this,
+                                                           nullptr,
+                                                           &Write,
+                                                           nullptr
+                );
+                if(!avio_out) {
+                    printf("Fail to create avio context\n");
                     return false;
                 }
+
+                format_context->pb = avio_out;
+                format_context->flags = AVFMT_FLAG_CUSTOM_IO;
+
+                fptr = fopen(file_path.c_str(), "wb+");
             }
         }
 
@@ -270,6 +308,8 @@ private:
     unsigned long long int file_duration;
     AVFormatContext *format_context;
     unsigned int video_stream_id;
+    unsigned int avio_buffer_size;
+    FILE *fptr;
 };
 
 int main(int argc, char **argv)
@@ -292,7 +332,7 @@ int main(int argc, char **argv)
         output.WriteH264VideoSample(sample, sample_size, is_key_frame, duration);
 
         // Sleep to simulate processing time
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        //std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     return 0;
