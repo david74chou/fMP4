@@ -30,21 +30,50 @@ public:
             , video_sample_max_size(0)
             , video_sample_number(0)
             , video_duration(0)
+            , pSeqHeaders(nullptr)
+            , pSeqHeaderSize(nullptr)
+            , pPictHeaders(nullptr)
+            , pPictHeaderSize(nullptr)
     {
         handle = MP4Read(this->file_path.c_str());
 
         video_track_id = MP4FindTrackId(handle, 0, MP4_VIDEO_TRACK_TYPE);
         if (video_track_id != MP4_INVALID_TRACK_ID) {
             video_timescale = MP4GetTrackTimeScale(handle, video_track_id);
-            video_sample_max_size = MP4GetTrackMaxSampleSize(handle, video_track_id);
+            video_sample_max_size = MP4GetTrackMaxSampleSize(handle, video_track_id) * 2;
             video_duration = MP4GetTrackDuration(handle, video_track_id);
             video_sample = new unsigned char[video_sample_max_size];
             video_sample_number = MP4GetTrackNumberOfSamples(handle, video_track_id);
+
+            if (MP4GetTrackH264SeqPictHeaders(handle,
+                                              video_track_id,
+                                              &pSeqHeaders,
+                                              &pSeqHeaderSize,
+                                              &pPictHeaders,
+                                              &pPictHeaderSize))
+            {
+                printf("Get SPS(%d) and PPS(%d)\n", *pSeqHeaderSize, *pPictHeaderSize);
+
+                for(int i = 0; (pSeqHeaders[i] && pSeqHeaderSize[i]); i++) {
+                    printf("SPS(%d): %02x %02x %02x %02x %02x\n", i,
+                           pSeqHeaders[i][0], pSeqHeaders[i][1], pSeqHeaders[i][2],
+                           pSeqHeaders[i][3], pSeqHeaders[i][4]);
+                }
+                for(int i = 0; (pPictHeaders[i] && pPictHeaderSize[i]); i++) {
+                    printf("PPS(%d): %02x %02x %02x %02x %02x\n", i,
+                           pPictHeaders[i][0], pPictHeaders[i][1], pPictHeaders[i][2],
+                           pPictHeaders[i][3], pPictHeaders[i][4]);
+                }
+            }
         }
     }
 
     ~MP4Reader()
     {
+        if (pSeqHeaders || pSeqHeaderSize || pPictHeaders || pPictHeaderSize) {
+            MP4FreeH264SeqPictHeaders(pSeqHeaders, pSeqHeaderSize, pPictHeaders, pPictHeaderSize);
+        }
+
         if (handle != MP4_INVALID_FILE_HANDLE) MP4Close(handle);
         if (video_sample) delete[] video_sample;
     }
@@ -78,10 +107,34 @@ public:
             return MP4_READ_EOS;
         }
 
+        unsigned int video_sample_offset = 0;
+        if(MP4GetSampleSync(handle, video_track_id, next_video_sample_idx)) {
+            /*
+             * If current sample has key frame, we need to put SPS/PPS in front of key frame.
+             */
+            if (pSeqHeaders && pSeqHeaderSize) {
+                for(int i = 0; (pSeqHeaders[i] && pSeqHeaderSize[i]); i++) {
+                    (*(unsigned int *)(video_sample + video_sample_offset)) = htonl(1);
+                    video_sample_offset += 4;
+                    memcpy(video_sample + video_sample_offset, pSeqHeaders[i], pSeqHeaderSize[i]);
+                    video_sample_offset += pSeqHeaderSize[i];
+                }
+            }
+            if (pPictHeaders && pPictHeaderSize) {
+                for(int i = 0; (pPictHeaders[i] && pPictHeaderSize[i]); i++) {
+                    (*(unsigned int *)(video_sample + video_sample_offset)) = htonl(1);
+                    video_sample_offset += 4;
+                    memcpy(video_sample + video_sample_offset, pPictHeaders[i], pPictHeaderSize[i]);
+                    video_sample_offset += pPictHeaderSize[i];
+                }
+            }
+        }
+
         MP4Duration mp4_duration = 0;
+        unsigned char *video_sample_start_addr = video_sample + video_sample_offset;
         sample_size = video_sample_max_size;
         if (!MP4ReadSample(handle, video_track_id, next_video_sample_idx,
-                           &video_sample, &sample_size,
+                           &video_sample_start_addr, &sample_size,
                            NULL,
                            &mp4_duration,
                            NULL,
@@ -92,7 +145,7 @@ public:
 
         // Convert AVC1 format to AnnexB
         if (sample_size >= 4) {
-            unsigned int *p = (unsigned int *) video_sample;
+            unsigned int *p = (unsigned int *) video_sample_start_addr;
             *p = htonl(1);
         }
 
@@ -116,6 +169,10 @@ private:
     unsigned int video_sample_max_size;
     unsigned int video_sample_number;
     unsigned long long int video_duration;
+    unsigned char **pSeqHeaders;
+    unsigned int *pSeqHeaderSize;
+    unsigned char **pPictHeaders;
+    unsigned int *pPictHeaderSize;
 };
 
 class MP4Writer
@@ -290,9 +347,6 @@ int main(int argc, char **argv)
     bool is_key_frame = false;
     while (input.GetNextH264VideoSample(&sample, sample_size, duration, is_key_frame) == MP4Reader::MP4_READ_OK) {
         output.WriteH264VideoSample(sample, sample_size, is_key_frame, duration);
-
-        // Sleep to simulate processing time
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     return 0;
