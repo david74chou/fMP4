@@ -37,6 +37,12 @@ if(MP4V2_FOUND)
     include_directories(${MP4V2_INCLUDE_DIRS})
 endif()
 
+pkg_check_modules(GSTCODECPARSERLIB REQUIRED gstreamer-codecparsers-1.0)
+if(GSTCODECPARSERLIB_FOUND)
+    include_directories(${GSTCODECPARSERLIB_INCLUDE_DIRS})
+    link_directories(${GSTCODECPARSERLIB_LIBRARY_DIRS})
+endif()
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -D__STDC_CONSTANT_MACROS")
 
 add_executable(fMP4-sample1 sample1.cpp)
@@ -85,4 +91,15 @@ target_link_libraries(fMP4-sample5
         ${LIBSWSCALE_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
         ${MP4V2_LIBRARY}
+)
+
+add_executable(fMP4-sample6 sample6.cpp)
+target_link_libraries(fMP4-sample6
+        ${LIBAVCODEC_LIBRARIES}
+        ${LIBAVUTIL_LIBRARIES}
+        ${LIBAVFORMAT_LIBRARIES}
+        ${LIBSWSCALE_LIBRARIES}
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${MP4V2_LIBRARY}
+        ${GSTCODECPARSERLIB_LIBRARIES}
 )

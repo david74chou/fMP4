@@ -42,6 +42,7 @@ RUN apt-get -y install \
             libxcb-shm0-dev \
             libxcb-xfixes0-dev \
             libx264-dev \
+            libgstreamer-plugins-bad1.0-dev \
             texinfo \
             zlib1g-dev \
             yasm \
