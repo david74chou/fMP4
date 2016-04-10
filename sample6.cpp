@@ -184,7 +184,7 @@ class MP4Writer
 {
 public:
 
-    MP4Writer(const std::string &file_path)
+    MP4Writer(const std::string &file_path, const bool is_open_new_file)
             : file_path(file_path)
             , file_duration(0)
             , format_context(nullptr)
@@ -192,6 +192,7 @@ public:
             , avio_buffer_size(1024 * 1024)
             , fptr(nullptr)
             , h264_parser(gst_h264_nal_parser_new())
+            , is_open_new_file(is_open_new_file)
     {
         av_register_all();
     }
@@ -403,7 +404,7 @@ private:
                 format_context->pb = avio_out;
                 format_context->flags = AVFMT_FLAG_CUSTOM_IO;
 
-                fptr = fopen(file_path.c_str(), "wb+");
+                fptr = fopen(file_path.c_str(), is_open_new_file ? "wb" : "ab");
             }
         }
 
@@ -457,6 +458,7 @@ private:
     unsigned int avio_buffer_size;
     FILE *fptr;
     GstH264NalParser *h264_parser;
+    bool is_open_new_file;
 };
 
 int main(int argc, char **argv)
@@ -466,10 +468,10 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    MP4Writer output(argv[argc - 1]);
-
+    bool is_open_new_file = true;
     int i = 1;
     do {
+        std::shared_ptr<MP4Writer> output = std::make_shared<MP4Writer>(argv[argc - 1], is_open_new_file);
         std::shared_ptr<MP4Reader> input = std::make_shared<MP4Reader>(argv[i]);
         printf("#%d: %s\n", i, argv[i]);
 
@@ -478,10 +480,11 @@ int main(int argc, char **argv)
         unsigned long long int duration = 0;
         bool is_key_frame = false;
         while (input->GetNextH264VideoSample(&sample, sample_size, duration, is_key_frame) == MP4Reader::MP4_READ_OK) {
-            output.WriteH264VideoSample(sample, sample_size, is_key_frame, duration);
+            output->WriteH264VideoSample(sample, sample_size, is_key_frame, duration);
         }
 
         i++;
+        is_open_new_file = false;
     } while (i < argc - 1);
 
     return 0;
