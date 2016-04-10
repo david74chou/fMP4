@@ -132,7 +132,7 @@ public:
 
         MP4Duration mp4_duration = 0;
         unsigned char *video_sample_start_addr = video_sample + video_sample_offset;
-        sample_size = video_sample_max_size;
+        sample_size = video_sample_max_size - video_sample_offset;
         if (!MP4ReadSample(handle, video_track_id, next_video_sample_idx,
                            &video_sample_start_addr, &sample_size,
                            NULL,
@@ -150,6 +150,7 @@ public:
         }
 
         *sample = video_sample;
+        sample_size += video_sample_offset;
         duration = (1000 * mp4_duration) / time_scale;
         next_video_sample_idx++;
         return MP4_READ_OK;
