@@ -222,8 +222,12 @@ public:
     static int Write(void* opaque, uint8_t* buf, int buf_size)
     {
         static int i = 0;
-        //printf("#%d Write: buf: %p(%02x%02x%02x%02x %c%c%c%c), size: %d\n", i++, buf, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf_size);
-        return fwrite(buf, 1, buf_size, reinterpret_cast<MP4Writer*>(opaque)->fptr);
+        printf("#%d Write: buf: %p(%02x%02x%02x%02x %c%c%c%c), size: %d\n", i++, buf, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf_size);
+        if (buf[4] == 'm' && buf[5] == 'f' && buf[6] == 'r' && buf[7] == 'a') {
+            return buf_size;
+        } else {
+            return fwrite(buf, 1, buf_size, reinterpret_cast<MP4Writer*>(opaque)->fptr);
+        }
     }
 
     // Performs a seek operation using the signature required for avio.
