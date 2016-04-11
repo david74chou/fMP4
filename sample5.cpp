@@ -239,85 +239,87 @@ public:
                            const double frame_rate,
                            const unsigned int bit_rate)
     {
-        avformat_alloc_output_context2(&format_context, nullptr, "mp4", nullptr);
         if (!format_context) {
-            printf("Fail to create output context\n");
-            return false;
-        }
-
-        AVStream *out_stream = avformat_new_stream(format_context, nullptr);
-        if (!out_stream) {
-            printf("Fail to allocate output stream\n");
-            return false;
-        }
-
-        out_stream->id = video_stream_id = format_context->nb_streams - 1;
-        out_stream->time_base = av_d2q(frame_rate, 100);
-        out_stream->codec->time_base = av_d2q(frame_rate, 100);
-        out_stream->codec->codec_id   = AV_CODEC_ID_H264;
-        out_stream->codec->profile    = FF_PROFILE_H264_CONSTRAINED_BASELINE;
-        out_stream->codec->level      = 40;
-        out_stream->codec->codec_type = AVMEDIA_TYPE_VIDEO;
-        out_stream->codec->width      = width;
-        out_stream->codec->height     = height;
-        out_stream->codec->bit_rate   = bit_rate;
-        out_stream->codec->pix_fmt    = AV_PIX_FMT_YUV420P;
-        out_stream->codec->codec_tag  = 0;
-
-        // Fill extra data for AVCC format
-        out_stream->codec->extradata_size = 7;
-        out_stream->codec->extradata = (uint8_t *)av_mallocz(out_stream->codec->extradata_size);
-        out_stream->codec->extradata[0] = 0x01;                                 // configurationVersion
-        out_stream->codec->extradata[1] = FF_PROFILE_H264_BASELINE;             // AVCProfileIndication
-        out_stream->codec->extradata[2] = (uint8_t)FF_PROFILE_H264_CONSTRAINED; // profile_compatibility
-        out_stream->codec->extradata[3] = 0x28;                                 // AVCLevelIndication, level: 4.0
-        out_stream->codec->extradata[4] = 0xff;                                 // 6 bits reserved (111111) + 2 bits nal size length - 1 (11)
-        out_stream->codec->extradata[5] = 0xe0;                                 // 3 bits reserved (111) + 5 bits number of sps (00000)
-        out_stream->codec->extradata[6] = 0x00;                                 // 8 bits number of pps (00000000)
-
-        if (format_context->oformat->flags & AVFMT_GLOBALHEADER)
-            out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-
-        av_dump_format(format_context, 0, "CustomAVIO", 1);
-
-        /*
-         * Open output file
-         */
-        {
-            if (!(format_context->oformat->flags & AVFMT_NOFILE)) {
-
-                // Allocate our custom AVIO context
-                AVIOContext *avio_out = avio_alloc_context(static_cast<unsigned char *>(av_malloc(avio_buffer_size)),
-                                                           avio_buffer_size,
-                                                           1,
-                                                           this,
-                                                           nullptr,
-                                                           &Write,
-                                                           nullptr
-                );
-                if(!avio_out) {
-                    printf("Fail to create avio context\n");
-                    return false;
-                }
-
-                format_context->pb = avio_out;
-                format_context->flags = AVFMT_FLAG_CUSTOM_IO;
-
-                fptr = fopen(file_path.c_str(), "wb+");
-            }
-        }
-
-        /*
-         * Write file header
-         */
-        {
-            AVDictionary *movflags = NULL;
-            av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof+frag_keyframe", 0);
-            if (avformat_write_header(format_context, &movflags) < 0) {
-                printf("Error occurred when opening output file\n");
+            avformat_alloc_output_context2(&format_context, nullptr, "mp4", nullptr);
+            if (!format_context) {
+                printf("Fail to create output context\n");
                 return false;
             }
-            av_dict_free(&movflags);
+
+            AVStream *out_stream = avformat_new_stream(format_context, nullptr);
+            if (!out_stream) {
+                printf("Fail to allocate output stream\n");
+                return false;
+            }
+
+            out_stream->id = video_stream_id = format_context->nb_streams - 1;
+            out_stream->time_base = av_d2q(frame_rate, 100);
+            out_stream->codec->time_base = av_d2q(frame_rate, 100);
+            out_stream->codec->codec_id   = AV_CODEC_ID_H264;
+            out_stream->codec->profile    = FF_PROFILE_H264_CONSTRAINED_BASELINE;
+            out_stream->codec->level      = 40;
+            out_stream->codec->codec_type = AVMEDIA_TYPE_VIDEO;
+            out_stream->codec->width      = width;
+            out_stream->codec->height     = height;
+            out_stream->codec->bit_rate   = bit_rate;
+            out_stream->codec->pix_fmt    = AV_PIX_FMT_YUV420P;
+            out_stream->codec->codec_tag  = 0;
+
+            // Fill extra data for AVCC format
+            out_stream->codec->extradata_size = 7;
+            out_stream->codec->extradata = (uint8_t *)av_mallocz(out_stream->codec->extradata_size);
+            out_stream->codec->extradata[0] = 0x01;                                 // configurationVersion
+            out_stream->codec->extradata[1] = FF_PROFILE_H264_BASELINE;             // AVCProfileIndication
+            out_stream->codec->extradata[2] = 0x00;                                 // profile_compatibility
+            out_stream->codec->extradata[3] = 0x28;                                 // AVCLevelIndication, level: 4.0
+            out_stream->codec->extradata[4] = 0xff;                                 // 6 bits reserved (111111) + 2 bits nal size length - 1 (11)
+            out_stream->codec->extradata[5] = 0xe0;                                 // 3 bits reserved (111) + 5 bits number of sps (00000)
+            out_stream->codec->extradata[6] = 0x00;                                 // 8 bits number of pps (00000000)
+
+            if (format_context->oformat->flags & AVFMT_GLOBALHEADER)
+                out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+
+            av_dump_format(format_context, 0, "CustomAVIO", 1);
+
+            /*
+             * Open output file
+             */
+            {
+                if (!(format_context->oformat->flags & AVFMT_NOFILE)) {
+
+                    // Allocate our custom AVIO context
+                    AVIOContext *avio_out = avio_alloc_context(static_cast<unsigned char *>(av_malloc(avio_buffer_size)),
+                                                               avio_buffer_size,
+                                                               1,
+                                                               this,
+                                                               nullptr,
+                                                               &Write,
+                                                               nullptr
+                    );
+                    if(!avio_out) {
+                        printf("Fail to create avio context\n");
+                        return false;
+                    }
+
+                    format_context->pb = avio_out;
+                    format_context->flags = AVFMT_FLAG_CUSTOM_IO;
+
+                    fptr = fopen(file_path.c_str(), "wb+");
+                }
+            }
+
+            /*
+             * Write file header
+             */
+            {
+                AVDictionary *movflags = NULL;
+                av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof+frag_keyframe", 0);
+                if (avformat_write_header(format_context, &movflags) < 0) {
+                    printf("Error occurred when opening output file\n");
+                    return false;
+                }
+                av_dict_free(&movflags);
+            }
         }
 
         return true;
@@ -377,26 +379,25 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    MP4Writer output(argv[argc - 1]);
+    std::shared_ptr<MP4Writer> output = std::make_shared<MP4Writer>(argv[argc - 1]);
 
     int i = 1;
-    std::shared_ptr<MP4Reader> input = std::make_shared<MP4Reader>(argv[i]);
-    printf("#%d: %s\n", i, argv[i]);
-    output.AddH264VideoTrack(input->GetVideoWidth(), input->GetVideoHeight(), input->GetVideoFps(), input->GetBitRate());
+    do {
+        std::shared_ptr<MP4Reader> input = std::make_shared<MP4Reader>(argv[i]);
+        printf("#%d: %s\n", i, argv[i]);
 
-    while (i < argc - 1) {
+        output->AddH264VideoTrack(input->GetVideoWidth(), input->GetVideoHeight(), input->GetVideoFps(), input->GetBitRate());
+
         unsigned char *sample = nullptr;
         unsigned int sample_size = 0;
         unsigned long long int duration = 0;
         bool is_key_frame = false;
         while (input->GetNextH264VideoSample(&sample, sample_size, duration, is_key_frame) == MP4Reader::MP4_READ_OK) {
-            output.WriteH264VideoSample(sample, sample_size, is_key_frame, duration);
+            output->WriteH264VideoSample(sample, sample_size, is_key_frame, duration);
         }
 
         i++;
-        printf("#%d: %s\n", i, argv[i]);
-        input = std::make_shared<MP4Reader>(argv[i]);
-    }
+    } while (i < argc - 1);
 
     return 0;
 }

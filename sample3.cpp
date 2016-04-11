@@ -246,7 +246,7 @@ public:
         out_stream->codec->extradata = (uint8_t *)av_mallocz(out_stream->codec->extradata_size);
         out_stream->codec->extradata[0] = 0x01;                                 // configurationVersion
         out_stream->codec->extradata[1] = FF_PROFILE_H264_BASELINE;             // AVCProfileIndication
-        out_stream->codec->extradata[2] = (uint8_t)FF_PROFILE_H264_CONSTRAINED; // profile_compatibility
+        out_stream->codec->extradata[2] = 0x00;                                 // profile_compatibility
         out_stream->codec->extradata[3] = 0x28;                                 // AVCLevelIndication, level: 4.0
         out_stream->codec->extradata[4] = 0xff;                                 // 6 bits reserved (111111) + 2 bits nal size length - 1 (11)
         out_stream->codec->extradata[5] = 0xe0;                                 // 3 bits reserved (111) + 5 bits number of sps (00000)

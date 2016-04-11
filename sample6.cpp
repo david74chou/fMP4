@@ -319,11 +319,13 @@ private:
             gst_h264_parser_parse_sps(h264_parser, &nal_sps, &sps, false);
 
             profile_idc = sps.profile_idc;
-            profile_compatibility = (sps.constraint_set0_flag << 7) | (sps.constraint_set1_flag << 6) |
-                                    (sps.constraint_set2_flag << 5) | (sps.constraint_set3_flag << 4);
             level_idc = sps.level_idc;
             width  = sps.frame_cropping_flag ? sps.crop_rect_width : sps.width;
             height = sps.frame_cropping_flag ? sps.crop_rect_height : sps.height;
+
+            profile_compatibility = 0x00;
+            //profile_compatibility = (sps.constraint_set0_flag << 7) | (sps.constraint_set1_flag << 6) |
+            //                        (sps.constraint_set2_flag << 5) | (sps.constraint_set3_flag << 4);
 
             printf("Profile: %d, Compatibility: %d, Level: %d\n", profile_idc, profile_compatibility, level_idc);
             printf("Width: %d, Height: %d\n", width, height);
