@@ -420,7 +420,8 @@ private:
          */
         {
             AVDictionary *movflags = nullptr;
-            av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof+frag_keyframe", 0);
+            av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof", 0);
+            av_dict_set_int(&movflags, "frag_duration", 200 * 1000, 0);
             if (avformat_write_header(format_context, &movflags) < 0) {
                 printf("Error occurred when opening output file\n");
                 return false;
