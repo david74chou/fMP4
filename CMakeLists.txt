@@ -103,3 +103,25 @@ target_link_libraries(fMP4-sample6
         ${MP4V2_LIBRARY}
         ${GSTCODECPARSERLIB_LIBRARIES}
 )
+
+add_executable(fMP4-sample7 sample7.cpp)
+target_link_libraries(fMP4-sample7
+        ${LIBAVCODEC_LIBRARIES}
+        ${LIBAVUTIL_LIBRARIES}
+        ${LIBAVFORMAT_LIBRARIES}
+        ${LIBSWSCALE_LIBRARIES}
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${MP4V2_LIBRARY}
+        ${GSTCODECPARSERLIB_LIBRARIES}
+)
+
+add_executable(fMP4-sample8 sample8.cpp)
+target_link_libraries(fMP4-sample8
+        ${LIBAVCODEC_LIBRARIES}
+        ${LIBAVUTIL_LIBRARIES}
+        ${LIBAVFORMAT_LIBRARIES}
+        ${LIBSWSCALE_LIBRARIES}
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${MP4V2_LIBRARY}
+        ${GSTCODECPARSERLIB_LIBRARIES}
+)
