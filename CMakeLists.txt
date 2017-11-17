@@ -37,6 +37,11 @@ if(MP4V2_FOUND)
     include_directories(${MP4V2_INCLUDE_DIRS})
 endif()
 
+find_package(BENTO4 REQUIRED)
+if(BENTO4_FOUND)
+    include_directories(${BENTO4_INCLUDE_DIRS})
+endif()
+
 pkg_check_modules(GSTCODECPARSERLIB REQUIRED gstreamer-codecparsers-1.0)
 if(GSTCODECPARSERLIB_FOUND)
     include_directories(${GSTCODECPARSERLIB_INCLUDE_DIRS})
@@ -123,5 +128,17 @@ target_link_libraries(fMP4-sample8
         ${LIBSWSCALE_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
         ${MP4V2_LIBRARY}
+        ${GSTCODECPARSERLIB_LIBRARIES}
+)
+
+add_executable(fMP4-sample9 sample9.cpp)
+target_link_libraries(fMP4-sample9
+        ${LIBAVCODEC_LIBRARIES}
+        ${LIBAVUTIL_LIBRARIES}
+        ${LIBAVFORMAT_LIBRARIES}
+        ${LIBSWSCALE_LIBRARIES}
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${MP4V2_LIBRARY}
+        ${BENTO4_LIBRARY}
         ${GSTCODECPARSERLIB_LIBRARIES}
 )
