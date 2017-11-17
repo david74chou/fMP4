@@ -12,6 +12,8 @@ extern "C" {
 #define GST_USE_UNSTABLE_API /* To avoid H264 parser warning */
 #include <gst/codecparsers/gsth264parser.h>
 
+#define FMP4_ONEFRAME_MODE
+
 class MP4Reader
 {
 public:
@@ -304,6 +306,12 @@ public:
                 }
 
                 file_duration += duration;
+
+#ifdef FMP4_ONEFRAME_MODE
+                if (av_write_frame(format_context, NULL) < 0) {
+                    printf("FMP4 OneFrame mode: Fail to write fragment\n");
+                }
+#endif
             }
         }
 
@@ -420,8 +428,12 @@ private:
          */
         {
             AVDictionary *movflags = nullptr;
+#ifdef FMP4_ONEFRAME_MODE
+            av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof+frag_custom", 0);
+#else
             av_dict_set(&movflags, "movflags", "empty_moov+default_base_moof", 0);
             av_dict_set_int(&movflags, "frag_duration", 200 * 1000, 0);
+#endif
             if (avformat_write_header(format_context, &movflags) < 0) {
                 printf("Error occurred when opening output file\n");
                 return false;
