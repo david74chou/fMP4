@@ -67,7 +67,7 @@ public:
                                               &pPictHeaders,
                                               &pPictHeaderSize))
             {
-                printf("VideoTrack: Get SPS(%d) and PPS(%d)\n", *pSeqHeaderSize, *pPictHeaderSize);
+                printf("VideoTrack: Get SPS(%d) and PPS(%d), sample_number: %d\n", *pSeqHeaderSize, *pPictHeaderSize, video_sample_number);
 
                 for(int i = 0; (pSeqHeaders[i] && pSeqHeaderSize[i]); i++) {
                     printf("SPS(%d): %02x %02x %02x %02x %02x\n", i,
@@ -84,12 +84,12 @@ public:
 
         audio_track_id = MP4FindTrackId(handle, 0, MP4_AUDIO_TRACK_TYPE);
         if (audio_track_id != MP4_INVALID_TRACK_ID) {
-            printf("AudioTrack: \n");
             audio_timescale = MP4GetTrackTimeScale(handle, audio_track_id);
             audio_sample_max_size = MP4GetTrackMaxSampleSize(handle, audio_track_id);
             audio_duration = MP4GetTrackDuration(handle, audio_track_id);
             audio_sample = new unsigned char[audio_sample_max_size];
             audio_sample_number = MP4GetTrackNumberOfSamples(handle, audio_track_id);
+            printf("AudioTrack: sample_number: %d\n", audio_sample_number);
         }
     }
 
@@ -122,6 +122,16 @@ public:
     unsigned int GetBitRate() const
     {
         return MP4GetTrackBitRate(handle, video_track_id);
+    }
+
+    unsigned int GetAudioChannels() const
+    {
+        return MP4GetTrackAudioChannels(handle, audio_track_id);
+    }
+
+    unsigned int GetAudioSampleRate() const
+    {
+        return audio_timescale;
     }
 
     MP4ReadStatus GetNextH264VideoSample(unsigned char **sample,
@@ -170,8 +180,19 @@ public:
         }
 
         // Convert AVC1 format to AnnexB
+        unsigned char *tmp_addr = video_sample_start_addr;
         if (sample_size >= 4) {
-            unsigned int *p = (unsigned int *) video_sample_start_addr;
+            while((tmp_addr[4] & 0x1F) != GST_H264_NAL_SLICE_IDR &&
+                  (tmp_addr[4] & 0x1F) != GST_H264_NAL_SLICE)
+            {
+                unsigned int *p = (unsigned int *) tmp_addr;
+                unsigned int header_size = ntohl(*p);
+                *p = htonl(1);
+
+                tmp_addr += (header_size + 4);
+            }
+
+            unsigned int *p = (unsigned int *) tmp_addr;
             *p = htonl(1);
         }
 
