@@ -2,6 +2,7 @@
 #include <thread>
 #include <vector>
 #include <memory>
+#include <bitset>
 
 #include <mp4v2/mp4v2.h>
 #include <netinet/in.h>
@@ -15,6 +16,7 @@
 #define MP4_DEFAULT_AUDIO_TRACK_ID  2
 #define MP4_DEFAULT_MOVIE_TIMESCALE 1000
 #define MP4_DEFAULT_VIDEO_TIMESCALE 9000
+#define MP4_DEFAULT_AUDIO_TIMESCALE 8000
 
 class MP4Reader
 {
@@ -435,7 +437,6 @@ public:
             // add samples to the fragment
             AP4_Array<AP4_UI32>            sample_indexes;
             AP4_Array<AP4_TrunAtom::Entry> trun_entries;
-            AP4_UI32                       mdat_size = AP4_ATOM_HEADER_SIZE;
             trun_entries.SetItemCount(m_Samples.ItemCount());
             for (unsigned int i=0; i<m_Samples.ItemCount(); i++) {
                 // if we have one non-zero CTS delta, we'll need to express it
@@ -449,8 +450,6 @@ public:
                 trun_entry.sample_size                    = m_Samples[i].GetSize();
                 trun_entry.sample_composition_time_offset = m_Samples[i].GetCtsDelta();
                 trun_entry.sample_flags = m_Samples[i].IsSync() ? 0x02000000 : 0x01010000;
-
-                mdat_size += trun_entry.sample_size;
             }
 
             // update moof and children
@@ -538,9 +537,287 @@ private:
     GstH264NalParser *h264_parser;
 };
 
+class AACSegmentBuilder : public AP4_FeedSegmentBuilder
+{
+public:
+    AACSegmentBuilder()
+            : AP4_FeedSegmentBuilder(AP4_Track::TYPE_AUDIO, MP4_DEFAULT_AUDIO_TRACK_ID)
+    {
+        m_Timescale = 0; // we will compute the real value when we get the first audio frame
+    }
+
+    ~AACSegmentBuilder()
+    {
+
+    }
+
+    void AddTrack(AP4_Movie* movie, const unsigned int sample_rate, const unsigned int channels)
+    {
+        // create a sample description for our samples
+        AP4_DataBuffer dsi;
+        SetDecoderConfig(dsi, sample_rate, channels);
+        AP4_MpegAudioSampleDescription *sample_description =
+                new AP4_MpegAudioSampleDescription(AP4_OTI_MPEG4_AUDIO,    // object type
+                                                   (AP4_UI32) sample_rate, // sample rate
+                                                   16,                     // sample size
+                                                   (AP4_UI16) channels,    // channel count
+                                                   &dsi,                   // decoder info
+                                                   0,                      // buffer size
+                                                   0,                      // max bitrate
+                                                   0);                     // average bitrate
+
+        // create a sample table (with no samples) to hold the sample description
+        AP4_SyntheticSampleTable* sample_table = new AP4_SyntheticSampleTable();
+        sample_table->AddSampleDescription(sample_description, true);
+
+        // create the track
+        m_Timescale = sample_rate;
+        AP4_Track* output_track = new AP4_Track(AP4_Track::TYPE_AUDIO,
+                                                sample_table,
+                                                m_TrackId,
+                                                MP4_DEFAULT_MOVIE_TIMESCALE,
+                                                0,
+                                                m_Timescale,
+                                                0,
+                                                m_TrackLanguage.GetChars(),
+                                                0,
+                                                0);
+        movie->AddTrack(output_track);
+    }
+
+    void AddTrexAtom(AP4_ContainerAtom* mvex)
+    {
+        // add a trex entry to the mvex container
+        AP4_TrexAtom* trex = new AP4_TrexAtom(m_TrackId, 1, 0, 0, 0);
+        mvex->AddChild(trex);
+    }
+
+    void AddTrafAtom(AP4_ContainerAtom* moof)
+    {
+        AP4_ContainerAtom* traf = new AP4_ContainerAtom(AP4_ATOM_TYPE_TRAF);
+
+        // Add tfhd into traf
+        {
+            AP4_TfhdAtom* tfhd = new AP4_TfhdAtom(AP4_TFHD_FLAG_DEFAULT_BASE_IS_MOOF,
+                                                  m_TrackId,
+                                                  0,
+                                                  1,
+                                                  0,
+                                                  0,
+                                                  0);
+            traf->AddChild(tfhd);
+        }
+
+
+        // Add tfdt into traf
+        {
+            AP4_TfdtAtom* tfdt = new AP4_TfdtAtom(1, m_MediaTimeOrigin + m_MediaStartTime);
+            traf->AddChild(tfdt);
+        }
+
+        // Add trun into traf
+        AP4_TrunAtom* trun = nullptr;
+        {
+            AP4_UI32 trun_flags = AP4_TRUN_FLAG_DATA_OFFSET_PRESENT     |
+                                  AP4_TRUN_FLAG_SAMPLE_DURATION_PRESENT |
+                                  AP4_TRUN_FLAG_SAMPLE_SIZE_PRESENT;
+            trun = new AP4_TrunAtom(trun_flags, 0, 0);
+            traf->AddChild(trun);
+        }
+
+        // Add traf into moof
+        moof->AddChild(traf);
+
+        // Update trun entries
+        {
+            // add samples to the fragment
+            AP4_Array<AP4_UI32>            sample_indexes;
+            AP4_Array<AP4_TrunAtom::Entry> trun_entries;
+            trun_entries.SetItemCount(m_Samples.ItemCount());
+            for (unsigned int i=0; i<m_Samples.ItemCount(); i++) {
+                // if we have one non-zero CTS delta, we'll need to express it
+                if (m_Samples[i].GetCtsDelta()) {
+                    trun->SetFlags(trun->GetFlags() | AP4_TRUN_FLAG_SAMPLE_COMPOSITION_TIME_OFFSET_PRESENT);
+                }
+
+                // add one sample
+                AP4_TrunAtom::Entry& trun_entry = trun_entries[i];
+                trun_entry.sample_duration                = m_Samples[i].GetDuration();
+                trun_entry.sample_size                    = m_Samples[i].GetSize();
+                trun_entry.sample_composition_time_offset = m_Samples[i].GetCtsDelta();
+            }
+
+            // update moof and children
+            trun->SetEntries(trun_entries);
+            trun->SetDataOffset((AP4_UI32)moof->GetSize() + AP4_ATOM_HEADER_SIZE);
+        }
+    }
+
+    unsigned int GetSampleSize()
+    {
+        unsigned int size = 0;
+        for (unsigned int i=0; i<m_Samples.ItemCount(); i++) {
+            size += m_Samples[i].GetSize();
+        }
+        return size;
+    }
+
+    bool WriteMdat(AP4_ByteStream &stream)
+    {
+        for (unsigned int i=0; i<m_Samples.ItemCount(); i++) {
+            AP4_Result result;
+            AP4_ByteStream* data_stream = m_Samples[i].GetDataStream();
+            result = data_stream->Seek(m_Samples[i].GetOffset());
+            if (AP4_FAILED(result)) {
+                data_stream->Release();
+                return false;
+            }
+            result = data_stream->CopyTo(stream, m_Samples[i].GetSize());
+            if (AP4_FAILED(result)) {
+                data_stream->Release();
+                return false;
+            }
+
+            data_stream->Release();
+        }
+
+        // update counters
+        m_MediaStartTime += m_MediaDuration;
+        m_MediaDuration = 0;
+
+        // cleanup
+        m_Samples.Clear();
+
+        return true;
+    }
+
+    bool Feed(const unsigned char *data,
+              unsigned int data_size,
+              unsigned long long int duration)
+    {
+        // format the sample data
+        AP4_MemoryByteStream* sample_data = new AP4_MemoryByteStream(data_size);
+        {
+            sample_data->Write(data, data_size);
+
+            // compute the duration in timescale
+            AP4_UI32 timescale_duration = (AP4_UI32)(AP4_ConvertTime(duration, 1000, m_Timescale));
+            AP4_UI64 timescale_dts      = m_MediaStartTime;
+
+            // create a new sample and add it to the list
+            AP4_Sample sample(*sample_data, 0, data_size, timescale_duration, 0, timescale_dts, 0, true);
+            AddSample(sample);
+        }
+        sample_data->Release();
+
+        return true;
+    }
+
+private:
+
+    unsigned long GetFreqMask(unsigned int freq)
+    {
+        switch (freq) {
+            case 96000:
+                return 0x0;
+            case 88200:
+                return 0x1;
+            case 64000:
+                return 0x2;
+            case 48000:
+                return 0x3;
+            case 44100:
+                return 0x4;
+            case 32000:
+                return 0x5;
+            case 24000:
+                return 0x6;
+            case 22050:
+                return 0x7;
+            case 16000:
+                return 0x8;
+            case 12000:
+                return 0x9;
+            case 11025:
+                return 0xa;
+            case 8000:
+                return 0xb;
+            case 7350:
+                return 0xc;
+            default:
+                return 0xb;
+        }
+    }
+
+    unsigned long GetChannelMask(unsigned int channels)
+    {
+        switch (channels) {
+            case 1:
+                return 0x1;
+            case 2:
+                return 0x2;
+            default:
+                return 0x1;
+        }
+    }
+
+    void SetDecoderConfig(AP4_DataBuffer &decoder_config, const unsigned int sample_rate, const unsigned int channels)
+    {
+        /*
+         * Refer to:
+         * http://www.wenwenti.info/article/805051
+         * http://niulei20012001.blog.163.com/blog/static/7514721120130694144813/
+         *
+         * example:
+         * +-----+----+----+---+
+         * |  A  | B  | C  | D |
+         * +-----+----+----+---+
+         * |00010|1011|0001|000|
+         * +-----+----+----+---+
+         * A: Object profile (AAC-LC)
+         * B: Sampling frequency index (0xb for 8000Hz)
+         * C: Channel configuration (1 channel)
+         * D: Reserved
+        */
+        unsigned int object_type = AP4_MPEG4_AUDIO_OBJECT_TYPE_AAC_LC;
+
+        std::bitset<16> prof_bit(object_type);
+        std::bitset<16> freq_bit(GetFreqMask(sample_rate));
+        std::bitset<16> ch_bit(GetChannelMask(channels));
+        std::bitset<16> bm = (prof_bit << 11) | (freq_bit << 7) | (ch_bit << 3);
+
+        unsigned long mask = bm.to_ulong();
+        unsigned char audio_specific_config[2];
+        audio_specific_config[0] = (unsigned char)((mask >> 8) & 0xff);
+        audio_specific_config[1] = (unsigned char)(mask & 0xff);
+
+        decoder_config.SetData(audio_specific_config, 2);
+    }
+
+    // These functions are dummy implement for AP4_FeedSegmentBuilder, but we never use them.
+    virtual AP4_Result WriteMediaSegment(AP4_ByteStream& stream, unsigned int sequence_number) { return AP4_SUCCESS; }
+    virtual AP4_Result WriteInitSegment(AP4_ByteStream &stream) { return AP4_SUCCESS; }
+    virtual AP4_Result Feed(const void *data, unsigned int data_size, unsigned int &bytes_consumed) { return AP4_SUCCESS; }
+};
+
 class MP4Writer
 {
 public:
+
+    struct VideoFrame {
+        unsigned char *sample;
+        unsigned int sample_size;
+        bool is_key_frame;
+        unsigned long long int duration;
+    };
+
+    struct AudioFrame {
+        unsigned char *sample;
+        unsigned int sample_size;
+        unsigned long long int duration;
+        unsigned int sample_rate;
+        unsigned int channels;
+    };
 
     MP4Writer(const std::string &file_path)
             : is_write_init_segment(false)
@@ -561,10 +838,7 @@ public:
             gst_h264_nal_parser_free(h264_parser);
     }
 
-    bool WriteH264VideoSample(unsigned char *sample,
-                              unsigned int sample_size,
-                              bool is_key_frame,
-                              unsigned long long int duration)
+    bool WriteAVSample(VideoFrame video_frame, AudioFrame audio_frame)
     {
         printf("WriteH264VideoSample -> \n");
 
@@ -575,15 +849,16 @@ public:
         }
 
         // Parse the sample into NALUs
-        std::vector<GstH264NalUnit> nalus = ParseH264NALU(sample, sample_size);
+        std::vector<GstH264NalUnit> nalus = ParseH264NALU(video_frame.sample, video_frame.sample_size);
 
         // Write init segment
-        if (is_key_frame && !is_write_init_segment) {
+        if (video_frame.is_key_frame && !is_write_init_segment) {
             // Reset segment builders
             avc_segment_builder.reset(new AVCSegmentBuilder());
+            aac_segment_builder.reset(new AACSegmentBuilder());
 
             WriteFtypAtom(file_output_stream);
-            WriteMoovAtom(file_output_stream, nalus);
+            WriteMoovAtom(file_output_stream, nalus, audio_frame.sample_rate, audio_frame.channels);
             is_write_init_segment = true;
         }
 
@@ -593,15 +868,22 @@ public:
         unsigned int byte_consumed = 0;
         for (auto nalu : nalus) {
             if (nalu.type == GST_H264_NAL_SLICE_IDR || nalu.type == GST_H264_NAL_SLICE) {
-                if (!avc_segment_builder->Feed(nalu.data + nalu.offset, nalu.size, is_key_frame, duration)) {
+                if (!avc_segment_builder->Feed(nalu.data + nalu.offset, nalu.size, video_frame.is_key_frame, video_frame.duration)) {
                     printf("ERROR: Feed() failed (%d)\n", result);
                     break;
                 }
-
-                WriteMoofAtom(file_output_stream, ++sequence_number);
-                WriteMdat(file_output_stream);
             }
         }
+
+        if (audio_frame.sample != nullptr) {
+            if (!aac_segment_builder->Feed(audio_frame.sample, audio_frame.sample_size, audio_frame.duration)) {
+                printf("ERROR: Feed() failed (%d)\n", result);
+                return false;
+            }
+        }
+
+        WriteMoofAtom(file_output_stream, ++sequence_number);
+        WriteMdat(file_output_stream);
 
         printf("WriteH264VideoSample <- \n\n");
         return true;
@@ -648,7 +930,10 @@ private:
         ftyp->Write(*stream);
     }
 
-    void WriteMoovAtom(AP4_ByteStream *stream, const std::vector<GstH264NalUnit> &nalus)
+    void WriteMoovAtom(AP4_ByteStream *stream,
+                       const std::vector<GstH264NalUnit> &nalus,
+                       const unsigned int sample_rate,
+                       const unsigned int channels)
     {
         GstH264NalUnit nal_sps = {0};
         GstH264NalUnit nal_pps = {0};
@@ -660,10 +945,14 @@ private:
         // Build moov atom
         std::unique_ptr<AP4_Movie> movie(new AP4_Movie(MP4_DEFAULT_MOVIE_TIMESCALE));
         {
-            // Add video track and mvex
+            // Add video/audio track
             avc_segment_builder->AddTrack(movie.get(), nal_sps, nal_pps);
+            aac_segment_builder->AddTrack(movie.get(), sample_rate, channels);
+
+            // Add mvex
             AP4_ContainerAtom* mvex = new AP4_ContainerAtom(AP4_ATOM_TYPE_MVEX);
             avc_segment_builder->AddTrexAtom(mvex);
+            aac_segment_builder->AddTrexAtom(mvex);
             movie->GetMoovAtom()->AddChild(mvex);
         }
 
@@ -680,8 +969,17 @@ private:
             AP4_MfhdAtom* mfhd = new AP4_MfhdAtom(sequence_number);
             moof->AddChild(mfhd);
 
-            // Add video traf
+            // Add traf
             avc_segment_builder->AddTrafAtom(moof.get());
+            aac_segment_builder->AddTrafAtom(moof.get());
+
+            AP4_ContainerAtom *traf = (AP4_ContainerAtom *)moof->GetChild(AP4_ATOM_TYPE_TRAF, 0);
+            AP4_TrunAtom* trun = (AP4_TrunAtom* )traf->GetChild(AP4_ATOM_TYPE_TRUN);
+            trun->SetDataOffset((AP4_UI32)moof->GetSize() + AP4_ATOM_HEADER_SIZE);
+
+            traf = (AP4_ContainerAtom *)moof->GetChild(AP4_ATOM_TYPE_TRAF, 1);
+            trun = (AP4_TrunAtom* )traf->GetChild(AP4_ATOM_TYPE_TRUN);
+            trun->SetDataOffset((AP4_UI32)moof->GetSize() + AP4_ATOM_HEADER_SIZE + avc_segment_builder->GetSampleSize());
         }
 
         // Write moof
@@ -692,6 +990,7 @@ private:
     {
         unsigned int mdat_size = AP4_ATOM_HEADER_SIZE;
         mdat_size += avc_segment_builder->GetSampleSize();
+        mdat_size += aac_segment_builder->GetSampleSize();
 
         stream->WriteUI32(mdat_size);
         stream->WriteUI32(AP4_ATOM_TYPE_MDAT);
@@ -699,10 +998,15 @@ private:
             printf("ERROR: Fail to write video sample into mdat\n");
             return;
         }
+        if (!aac_segment_builder->WriteMdat(*stream)) {
+            printf("ERROR: Fail to write audio sample into mdat\n");
+            return;
+        }
     }
 
     bool is_write_init_segment;
     std::unique_ptr<AVCSegmentBuilder> avc_segment_builder;
+    std::unique_ptr<AACSegmentBuilder> aac_segment_builder;
 
     std::string file_path;
     FileOutputStream *file_output_stream;
@@ -727,14 +1031,21 @@ int main(int argc, char **argv)
         unsigned char *video_sample = nullptr, *audio_sample = nullptr;
         unsigned int video_sample_size = 0, audio_sample_size = 0;
         unsigned long long int video_duration = 0, audio_duration = 0;
+        unsigned int audio_sample_rate = input->GetAudioSampleRate();
+        unsigned int audio_channels = input->GetAudioChannels();
+
         bool is_key_frame = false;
         while (input->GetNextH264VideoSample(&video_sample, video_sample_size, video_duration, is_key_frame) == MP4Reader::MP4_READ_OK) {
             printf("video: %dbytes, %lldms\n", video_sample_size, video_duration);
-//            if (input->GetNextAudioSample(&audio_sample, audio_sample_size, audio_duration) == MP4Reader::MP4_READ_OK) {
-//                printf("audio: %dbytes, %lldms\n", audio_sample_size, audio_duration);
-//            }
+            MP4Writer::VideoFrame video_frame = {video_sample, video_sample_size, is_key_frame, video_duration};
 
-            output->WriteH264VideoSample(video_sample, video_sample_size, is_key_frame, video_duration);
+            MP4Writer::AudioFrame audio_frame = {0};
+            if (input->GetNextAudioSample(&audio_sample, audio_sample_size, audio_duration) == MP4Reader::MP4_READ_OK) {
+                printf("audio: %dbytes(0x%02x 0x%02x), %lldms\n", audio_sample_size, audio_sample[0], audio_sample[1], audio_duration);
+                audio_frame = MP4Writer::AudioFrame{audio_sample, audio_sample_size, audio_duration, audio_sample_rate, audio_channels};
+            }
+
+            output->WriteAVSample(video_frame, audio_frame);
         }
 
         i++;
