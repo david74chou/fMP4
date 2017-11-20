@@ -849,7 +849,10 @@ public:
         }
 
         // Parse the sample into NALUs
-        std::vector<GstH264NalUnit> nalus = ParseH264NALU(video_frame.sample, video_frame.sample_size);
+        std::vector<GstH264NalUnit> nalus;
+        if (video_frame.sample != nullptr) {
+            nalus = ParseH264NALU(video_frame.sample, video_frame.sample_size);
+        }
 
         // Write init segment
         if (video_frame.is_key_frame && !is_write_init_segment) {
@@ -1033,16 +1036,36 @@ int main(int argc, char **argv)
         unsigned long long int video_duration = 0, audio_duration = 0;
         unsigned int audio_sample_rate = input->GetAudioSampleRate();
         unsigned int audio_channels = input->GetAudioChannels();
+        unsigned int video_count = 0, audio_count = 0;
+        MP4Reader::MP4ReadStatus video_result, audio_result;
 
         bool is_key_frame = false;
-        while (input->GetNextH264VideoSample(&video_sample, video_sample_size, video_duration, is_key_frame) == MP4Reader::MP4_READ_OK) {
-            printf("video: %dbytes, %lldms\n", video_sample_size, video_duration);
-            MP4Writer::VideoFrame video_frame = {video_sample, video_sample_size, is_key_frame, video_duration};
+        while (true) {
+
+            MP4Writer::VideoFrame video_frame = {0};
+            video_result = input->GetNextH264VideoSample(&video_sample, video_sample_size, video_duration, is_key_frame);
+            if (video_result == MP4Reader::MP4_READ_OK) {
+                printf("%d video: %dbytes, %lldms\n", ++video_count, video_sample_size, video_duration);
+                video_frame.sample = video_sample;
+                video_frame.sample_size = video_sample_size;
+                video_frame.sample_size = video_sample_size;
+                video_frame.is_key_frame = is_key_frame;
+                video_frame.duration = video_duration;
+            }
 
             MP4Writer::AudioFrame audio_frame = {0};
-            if (input->GetNextAudioSample(&audio_sample, audio_sample_size, audio_duration) == MP4Reader::MP4_READ_OK) {
-                printf("audio: %dbytes(0x%02x 0x%02x), %lldms\n", audio_sample_size, audio_sample[0], audio_sample[1], audio_duration);
-                audio_frame = MP4Writer::AudioFrame{audio_sample, audio_sample_size, audio_duration, audio_sample_rate, audio_channels};
+            audio_result = input->GetNextAudioSample(&audio_sample, audio_sample_size, audio_duration);
+            if (audio_result == MP4Reader::MP4_READ_OK) {
+                printf("%d audio: %dbytes(0x%02x 0x%02x), %lldms\n", ++audio_count, audio_sample_size, audio_sample[0], audio_sample[1], audio_duration);
+                audio_frame.sample = audio_sample;
+                audio_frame.sample_size = audio_sample_size;
+                audio_frame.duration = audio_duration;
+                audio_frame.sample_rate = audio_sample_rate;
+                audio_frame.channels = audio_channels;
+            }
+
+            if (video_result != MP4Reader::MP4_READ_OK && audio_result != MP4Reader::MP4_READ_OK) {
+                break;
             }
 
             output->WriteAVSample(video_frame, audio_frame);
