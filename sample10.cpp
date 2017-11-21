@@ -858,22 +858,30 @@ public:
             is_write_init_segment = true;
         }
 
-        // To compatible with AVC1 format, we could not put SPS/PPS in the sample.
-        // So, we need to parse the data and only write video frame NALU into mp4.
-        AP4_Result result;
-        unsigned int byte_consumed = 0;
-        for (auto nalu : nalus) {
-            if (nalu.type == GST_H264_NAL_SLICE_IDR || nalu.type == GST_H264_NAL_SLICE) {
-                if (!avc_segment_builder->Feed(nalu.data + nalu.offset, nalu.size, video_frame.is_key_frame, video_frame.duration)) {
-                    printf("ERROR: Feed() failed (%d)\n", result);
+        // 1. To compatible with AVC1 format, we could not put SPS/PPS in the sample.
+        //    So, we need to parse the data and only write video slice NALU into mp4.
+        // 2. To support multiple slices, we find the first VCL (Video Coding Layer) slice then
+        //    feed all following data into segment builder. It means all slices will be feed
+        //    into builder as a single sample. (We suppose all slices are in current video_frame)
+        if (video_frame.sample != nullptr) {
+            GstH264NalUnit first_vcl_nalu = {0};
+            for (auto nalu : nalus) {
+                if (nalu.type == GST_H264_NAL_SLICE_IDR || nalu.type == GST_H264_NAL_SLICE) {
+                    first_vcl_nalu = nalu;
                     break;
                 }
+            }
+            unsigned char *data = first_vcl_nalu.data + first_vcl_nalu.offset;
+            unsigned int data_size = (unsigned int)((video_frame.sample + video_frame.sample_size) - data);
+            if (!avc_segment_builder->Feed(data, data_size, video_frame.is_key_frame, video_frame.duration)) {
+                printf("ERROR: Feed() video failed\n");
+                return false;
             }
         }
 
         if (audio_frame.sample != nullptr) {
             if (!aac_segment_builder->Feed(audio_frame.sample, audio_frame.sample_size, audio_frame.duration)) {
-                printf("ERROR: Feed() failed (%d)\n", result);
+                printf("ERROR: Feed() audio failed\n");
                 return false;
             }
         }

@@ -206,8 +206,8 @@ public:
         static int i = 0;
         if (buf_size >=4) {
             if (isprint(buf[0]) && isprint(buf[1]) && isprint(buf[2]) && isprint(buf[3])) {
-                printf("#%d Write: buf: %p(%c%c%c%c), size: %d\n", i++,
-                       buffer, buf[0], buf[1], buf[2], buf[3], buf_size);
+//                printf("#%d Write: buf: %p(%c%c%c%c), size: %d\n", i++,
+//                       buffer, buf[0], buf[1], buf[2], buf[3], buf_size);
             }
         }
 
@@ -276,7 +276,7 @@ public:
                               bool is_key_frame,
                               unsigned long long int duration)
     {
-        printf("WriteH264VideoSample -> \n");
+        printf("WriteH264VideoSample -> (%c)\n", is_key_frame ? 'I' : 'P');
 
         // Parse the sample into NALUs
         std::vector<GstH264NalUnit> nalus = ParseH264NALU(sample, sample_size);
@@ -296,20 +296,29 @@ public:
             }
         }
 
-        // To compatible with AVC1 format, we could not put SPS/PPS in the sample.
-        // So, we need to parse the data and only write video frame NALU into mp4.
-        AP4_Result result;
-        unsigned int byte_consumed = 0;
+        // 1. To compatible with AVC1 format, we could not put SPS/PPS in the sample.
+        //    So, we need to parse the data and only write video slice NALU into mp4.
+        // 2. To support multiple slices, we find the first VCL (Video Coding Layer) slice then
+        //    feed all following data into segment builder. It means all slices will be feed
+        //    into builder as a single sample. (We suppose all slices are in current video_frame)
+        GstH264NalUnit first_vcl_nalu = {0};
         for (auto nalu : nalus) {
             if (nalu.type == GST_H264_NAL_SLICE_IDR || nalu.type == GST_H264_NAL_SLICE) {
-                if (!Feed(nalu.data + nalu.offset, nalu.size, is_key_frame, duration)) {
-                    printf("ERROR: Feed() failed (%d)\n", result);
-                    break;
-                }
-                if (file_output_stream) {
-                    WriteMediaSegment(*file_output_stream, ++sequence_number);
-                }
+                first_vcl_nalu = nalu;
+                break;
             }
+        }
+
+        static int c = 0;
+        unsigned char *data = first_vcl_nalu.data + first_vcl_nalu.offset;
+        unsigned int data_size = (unsigned int)((sample + sample_size) - data);
+        printf("%d Feed: %d bytes\n", c++, data_size);
+        if (!Feed(data, data_size, is_key_frame, duration)) {
+            printf("ERROR: Feed() failed\n");
+            return false;
+        }
+        if (file_output_stream) {
+            WriteMediaSegment(*file_output_stream, ++sequence_number);
         }
 
         printf("WriteH264VideoSample <- \n\n");
