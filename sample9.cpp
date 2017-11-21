@@ -151,19 +151,12 @@ public:
 
         // Convert AVC1 format to AnnexB
         unsigned char *tmp_addr = video_sample_start_addr;
-        if (sample_size >= 4) {
-            while((tmp_addr[4] & 0x1F) != GST_H264_NAL_SLICE_IDR &&
-                  (tmp_addr[4] & 0x1F) != GST_H264_NAL_SLICE)
-            {
-                unsigned int *p = (unsigned int *) tmp_addr;
-                unsigned int header_size = ntohl(*p);
-                *p = htonl(1);
-
-                tmp_addr += (header_size + 4);
-            }
-
+        while((tmp_addr - video_sample_start_addr) < sample_size)
+        {
             unsigned int *p = (unsigned int *) tmp_addr;
+            unsigned int header_size = ntohl(*p);
             *p = htonl(1);
+            tmp_addr += (header_size + 4);
         }
 
         *sample = video_sample;
@@ -601,10 +594,11 @@ int main(int argc, char **argv)
         printf("#%d: %s\n", i, argv[i]);
 
         unsigned char *sample = nullptr;
-        unsigned int sample_size = 0;
+        unsigned int sample_size = 0, count = 0;
         unsigned long long int duration = 0;
         bool is_key_frame = false;
         while (input->GetNextH264VideoSample(&sample, sample_size, duration, is_key_frame) == MP4Reader::MP4_READ_OK) {
+            printf("%d video: %dbytes, %lldms\n", count++, sample_size, duration);
             output->WriteH264VideoSample(sample, sample_size, is_key_frame, duration);
         }
 

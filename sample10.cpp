@@ -183,19 +183,12 @@ public:
 
         // Convert AVC1 format to AnnexB
         unsigned char *tmp_addr = video_sample_start_addr;
-        if (sample_size >= 4) {
-            while((tmp_addr[4] & 0x1F) != GST_H264_NAL_SLICE_IDR &&
-                  (tmp_addr[4] & 0x1F) != GST_H264_NAL_SLICE)
-            {
-                unsigned int *p = (unsigned int *) tmp_addr;
-                unsigned int header_size = ntohl(*p);
-                *p = htonl(1);
-
-                tmp_addr += (header_size + 4);
-            }
-
+        while((tmp_addr - video_sample_start_addr) < sample_size)
+        {
             unsigned int *p = (unsigned int *) tmp_addr;
+            unsigned int header_size = ntohl(*p);
             *p = htonl(1);
+            tmp_addr += (header_size + 4);
         }
 
         *sample = video_sample;
